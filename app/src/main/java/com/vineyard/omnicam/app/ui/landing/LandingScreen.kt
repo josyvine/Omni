@@ -20,6 +20,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -31,6 +34,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -61,6 +65,11 @@ fun LandingScreen(
     onGuestQrScanned: ((String) -> Unit)? = null
 ) {
     val showByoDialog by viewModel.showByoDialog.collectAsState()
+    val configuredProjectId by viewModel.configuredProjectId.collectAsState()
+    val isDriveConnected by viewModel.isDriveConnected.collectAsState()
+    val currentUser by viewModel.currentUser.collectAsState()
+    val statusMessage by viewModel.statusMessage.collectAsState()
+
     var showScanQrDialog by remember { mutableStateOf(false) }
 
     // BYO-Firebase Configuration Dialog
@@ -155,7 +164,32 @@ fun LandingScreen(
             PillarBadge(icon = Icons.Default.Security, label = "Serverless", color = IndigoAccent)
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Real-Time Feedback Banner (Displays connection status or alerts)
+        if (statusMessage != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = EmeraldLive.copy(alpha = 0.15f)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldLive, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = statusMessage!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                    IconButton(onClick = { viewModel.clearStatusMessage() }, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         // Action Card 1: Quick Start (Local & Direct)
         ActionCard(
@@ -169,17 +203,21 @@ fun LandingScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Action Card 2: Sign In with Google (Drive 15GB Cloud)
+        // Action Card 2: Connect Google Account (Drive Cloud)
+        val driveSubtitle = if (isDriveConnected) {
+            "Connected: ${currentUser?.email ?: "Google Account Active"}. Free 15 GB Drive cloud backup ready."
+        } else {
+            "Enables free 15 GB Google Drive anti-theft cloud clip uploads via OAuth 2.0 PKCE. Opens secure browser and returns here."
+        }
         ActionCard(
-            title = "Connect Google Account",
-            subtitle = "Enables free 15 GB Google Drive anti-theft cloud clip uploads via OAuth 2.0 PKCE. Opens secure browser and returns here.",
-            icon = Icons.Default.CloudQueue,
+            title = if (isDriveConnected) "Google Drive Connected" else "Connect Google Account",
+            subtitle = driveSubtitle,
+            icon = if (isDriveConnected) Icons.Default.CloudDone else Icons.Default.CloudQueue,
             accentColor = EmeraldLive,
+            statusBadge = if (isDriveConnected) "Connected" else null,
             testTag = "action_google_signin",
             onClick = {
                 viewModel.connectGoogleDrive()
-                // Does NOT navigate to dashboard prematurely.
-                // The browser Custom Tab handles authentication and deep-link returns back here.
             }
         )
 
@@ -197,12 +235,18 @@ fun LandingScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Action Card 4: Advanced BYO-Firebase
+        // Action Card 4: Bring-Your-Own Firebase
+        val byoSubtitle = if (configuredProjectId != null) {
+            "Project: $configuredProjectId is active. Generated member QR codes will automatically bundle these credentials."
+        } else {
+            "Privacy-first architecture. Supply your own google-services.json for dedicated private cloud storage."
+        }
         ActionCard(
-            title = "Bring-Your-Own Firebase",
-            subtitle = "Privacy-first architecture. Supply your own google-services.json for dedicated private cloud storage.",
-            icon = Icons.Default.Storage,
-            accentColor = ElectricBlue,
+            title = if (configuredProjectId != null) "House Admin Firebase Configured" else "Bring-Your-Own Firebase",
+            subtitle = byoSubtitle,
+            icon = if (configuredProjectId != null) Icons.Default.CheckCircle else Icons.Default.Storage,
+            accentColor = if (configuredProjectId != null) EmeraldLive else ElectricBlue,
+            statusBadge = if (configuredProjectId != null) "Active: $configuredProjectId" else null,
             testTag = "action_byo_firebase",
             onClick = { viewModel.openByoDialog() }
         )
@@ -253,6 +297,7 @@ private fun ActionCard(
     subtitle: String,
     icon: ImageVector,
     accentColor: Color,
+    statusBadge: String? = null,
     testTag: String,
     onClick: () -> Unit
 ) {
@@ -291,12 +336,32 @@ private fun ActionCard(
             Spacer(modifier = Modifier.width(14.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    if (statusBadge != null) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(accentColor.copy(alpha = 0.15f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = statusBadge,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = accentColor
+                            )
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = subtitle,
