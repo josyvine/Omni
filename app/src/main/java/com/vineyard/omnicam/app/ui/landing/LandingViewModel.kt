@@ -27,6 +27,9 @@ class LandingViewModel(
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
     val isDriveConnected: StateFlow<Boolean> = authRepository.isDriveConnected
     val currentUser: StateFlow<UserProfile?> = authRepository.currentUser
 
@@ -71,6 +74,10 @@ class LandingViewModel(
         _statusMessage.value = null
     }
 
+    fun setGuestConnected(adminEmail: String) {
+        _statusMessage.value = "Connected to House Admin: $adminEmail"
+    }
+
     fun connectGoogleDrive() {
         authRepository.initiateGoogleDriveOAuth()
     }
@@ -81,9 +88,14 @@ class LandingViewModel(
      */
     fun signInWithGoogle(idToken: String, onResult: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
+            _isLoading.value = true
             val result = authRepository.signInWithGoogle(idToken)
+            _isLoading.value = false
+
             if (result.isSuccess) {
                 _statusMessage.value = "Signed in as ${result.getOrNull()?.email}"
+            } else {
+                _statusMessage.value = result.exceptionOrNull()?.localizedMessage ?: "Google Sign-In failed."
             }
             onResult(result.isSuccess)
         }
@@ -92,15 +104,30 @@ class LandingViewModel(
     /**
      * Saves the custom Firebase configuration and dynamically mounts the "admin_cam_app" instance.
      */
-    fun saveByoFirebase(json: String) {
+    fun saveByoFirebase(json: String, onComplete: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
+            _isLoading.value = true
             settingsRepository.saveCustomFirebaseJson(json)
             val success = firebaseModule.initializeByoFirebase(json)
+            _isLoading.value = false
+
             if (success) {
                 _statusMessage.value = "House Admin Firebase successfully configured!"
             } else {
                 _statusMessage.value = "Failed to initialize Firebase with provided JSON."
             }
+            onComplete(success)
+        }
+    }
+
+    /**
+     * Clears the custom Firebase configuration and resets to default.
+     */
+    fun clearByoFirebase() {
+        viewModelScope.launch {
+            settingsRepository.clearCustomFirebaseJson()
+            firebaseModule.clearCustomConfig()
+            _statusMessage.value = "Firebase configuration cleared."
         }
     }
 }
