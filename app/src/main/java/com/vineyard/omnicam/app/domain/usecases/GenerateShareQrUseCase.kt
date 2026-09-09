@@ -8,13 +8,30 @@ import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.vineyard.omnicam.app.core.security.CryptoManager
 import com.vineyard.omnicam.app.data.models.ShareToken
+import com.vineyard.omnicam.app.data.repository.SettingsRepository
 import org.json.JSONArray
 import org.json.JSONObject
+import javax.inject.Inject
 
-class GenerateShareQrUseCase(
-    private val cryptoManager: CryptoManager
+/**
+ * UseCase to generate, encrypt, and render QR share codes for Guest / Member access.
+ * 
+ * Bundles:
+ * 1. Random Share Token UUID.
+ * 2. Admin identifier.
+ * 3. Permitted camera IDs list.
+ * 4. Permission level ("VIEW_ONLY" or "FULL_CONTROL_PTZ").
+ * 5. Expiration timestamp.
+ * 6. Admin's Firebase JSON configuration (allowing guests to connect to Admin's private DB).
+ */
+class GenerateShareQrUseCase @Inject constructor(
+    private val cryptoManager: CryptoManager,
+    private val settingsRepository: SettingsRepository? = null
 ) {
 
+    /**
+     * Generates a new ShareToken domain model.
+     */
     fun generateShareToken(
         adminEmail: String,
         selectedCameraIds: List<String>,
@@ -37,41 +54,65 @@ class GenerateShareQrUseCase(
         )
     }
 
-    fun encodeToEncryptedPayload(token: ShareToken): String {
+    /**
+     * Serializes and encrypts the ShareToken along with the Admin's Firebase configuration into an AES-256 string.
+     */
+    fun encodeToEncryptedPayload(
+        token: ShareToken,
+        customFirebaseJson: String? = null
+    ): String {
+        val configToPack = customFirebaseJson 
+            ?: settingsRepository?.getCustomFirebaseJson() 
+            ?: ""
+
         val json = JSONObject().apply {
             put("token", token.token)
             put("admin", token.adminEmail)
             put("cameras", JSONArray(token.cameraIds))
             put("perm", token.permission)
             put("exp", token.expiresAt)
+            if (configToPack.isNotBlank()) {
+                put("firebaseConfig", configToPack)
+            }
+            put("createdAt", token.createdAt)
             put("v", 1)
         }.toString()
 
         return cryptoManager.encrypt(json)
     }
 
+    /**
+     * Decrypts and parses an incoming encrypted payload.
+     */
     fun decodeEncryptedPayload(encryptedText: String): ShareToken? {
         return try {
             val decrypted = cryptoManager.decrypt(encryptedText)
             val json = JSONObject(decrypted)
             val cameraList = mutableListOf<String>()
-            val array = json.getJSONArray("cameras")
-            for (i in 0 until array.length()) {
-                cameraList.add(array.getString(i))
+            val array = json.optJSONArray("cameras")
+            if (array != null) {
+                for (i in 0 until array.length()) {
+                    cameraList.add(array.getString(i))
+                }
             }
 
             ShareToken(
                 token = json.getString("token"),
+                adminUserId = json.optString("adminUserId", "admin_master"),
                 adminEmail = json.optString("admin", "Admin"),
                 cameraIds = cameraList,
                 permission = json.optString("perm", "VIEW_ONLY"),
-                expiresAt = json.optLong("exp", 0L)
+                expiresAt = json.optLong("exp", 0L),
+                createdAt = json.optLong("createdAt", System.currentTimeMillis())
             )
         } catch (_: Exception) {
             null
         }
     }
 
+    /**
+     * Renders an encrypted string into a high-contrast QR Code Bitmap.
+     */
     fun renderQrBitmap(content: String, size: Int = 512): Bitmap {
         val hints = mapOf(
             EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.H,
