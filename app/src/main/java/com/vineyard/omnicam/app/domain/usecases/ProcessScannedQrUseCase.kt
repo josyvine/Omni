@@ -108,7 +108,7 @@ class ProcessScannedQrUseCase @Inject constructor(
                 else -> null
             }
 
-            if (!finalFirebaseJson.isNull prematureBlank()) {
+            if (!finalFirebaseJson.isNullOrBlank()) {
                 // Save config to encrypted persistent storage
                 settingsRepository.saveCustomFirebaseJson(finalFirebaseJson)
 
@@ -134,9 +134,5 @@ class ProcessScannedQrUseCase @Inject constructor(
         } catch (e: Exception) {
             Result.failure(e)
         }
-    }
-
-    private fun String?.isNullOrBlankCompat(): Boolean {
-        return this == null || this.trim().isEmpty()
     }
 }
