@@ -15,21 +15,21 @@ import com.google.firebase.FirebaseOptions
  */
 object CentralConfig {
 
-    // Web Client ID (Type 3 OAuth Client ID from Google Cloud Console)
+    // Web Client ID (Type 3 OAuth Client ID from google-services.json)
     // Used for Google Sign-In ID Token requests and PKCE auth code exchanges.
-    const val WEB_CLIENT_ID: String = "YOUR_CENTRAL_WEB_CLIENT_ID.apps.googleusercontent.com"
+    const val WEB_CLIENT_ID: String = "248540631596-lnma6a7vsnto7efthdhdd216usvqlaqu.apps.googleusercontent.com"
 
     // Developer Central Firebase API Key
-    const val API_KEY: String = "AIzaSyYOUR_CENTRAL_DEVELOPER_FIREBASE_API_KEY"
+    const val API_KEY: String = "AIzaSyCq89ULCTPjuR5-VfvFAUKK0f_bZJ6rCCs"
 
     // Central Firebase Project ID
-    const val PROJECT_ID: String = "omnicam-vision-central"
+    const val PROJECT_ID: String = "omnicam-93996"
 
     // Android Mobile Application ID
-    const val APPLICATION_ID: String = "1:000000000000:android:0000000000000000000000"
+    const val APPLICATION_ID: String = "1:248540631596:android:c969a5e57600bf590ef789"
 
-    // Default Storage Bucket for master configs (if needed)
-    const val STORAGE_BUCKET: String = "omnicam-vision-central.appspot.com"
+    // Default Storage Bucket
+    const val STORAGE_BUCKET: String = "omnicam-93996.firebasestorage.app"
 
     // OAuth 2.0 PKCE Redirect Configuration
     const val OAUTH_REDIRECT_SCHEME: String = "com.vineyard.omnicam.app"
