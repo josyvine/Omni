@@ -11,6 +11,7 @@ import com.vineyard.omnicam.app.domain.usecases.AuthenticateBrandUseCase
 import com.vineyard.omnicam.app.domain.usecases.DiscoverCamerasUseCase
 import com.vineyard.omnicam.app.domain.usecases.GenerateShareQrUseCase
 import com.vineyard.omnicam.app.domain.usecases.IdentifyDeviceUseCase
+import com.vineyard.omnicam.app.domain.usecases.ProcessScannedQrUseCase
 import com.vineyard.omnicam.app.domain.usecases.SyncDriveEventsUseCase
 
 class AppModule(val context: Context) {
@@ -36,7 +37,7 @@ class AppModule(val context: Context) {
     }
 
     val authRepository: AuthRepository by lazy {
-        AuthRepository(context, firebaseModule.auth)
+        AuthRepository(context, firebaseModule, settingsRepository)
     }
 
     val cameraRepository: CameraRepository by lazy {
@@ -56,7 +57,11 @@ class AppModule(val context: Context) {
     }
 
     val generateShareQrUseCase: GenerateShareQrUseCase by lazy {
-        GenerateShareQrUseCase(cryptoManager)
+        GenerateShareQrUseCase(cryptoManager, settingsRepository)
+    }
+
+    val processScannedQrUseCase: ProcessScannedQrUseCase by lazy {
+        ProcessScannedQrUseCase(cryptoManager, settingsRepository, firebaseModule)
     }
 
     val syncDriveEventsUseCase: SyncDriveEventsUseCase by lazy {
