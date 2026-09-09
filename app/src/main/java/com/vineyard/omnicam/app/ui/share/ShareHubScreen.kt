@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Share
@@ -52,12 +53,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.vineyard.omnicam.app.core.theme.AmberWarning
 import com.vineyard.omnicam.app.core.theme.CyanAccent
 import com.vineyard.omnicam.app.core.theme.EmeraldLive
 import com.vineyard.omnicam.app.core.theme.RoseAlert
 import com.vineyard.omnicam.app.data.models.CameraEntity
 import com.vineyard.omnicam.app.data.models.ShareToken
 import com.vineyard.omnicam.app.data.repository.CameraRepository
+import com.vineyard.omnicam.app.data.repository.SettingsRepository
 import com.vineyard.omnicam.app.domain.usecases.GenerateShareQrUseCase
 import com.vineyard.omnicam.app.domain.usecases.ProcessScannedQrUseCase
 import kotlinx.coroutines.launch
@@ -70,10 +73,13 @@ fun ShareHubScreen(
     cameraRepository: CameraRepository,
     generateShareQrUseCase: GenerateShareQrUseCase,
     processScannedQrUseCase: ProcessScannedQrUseCase? = null,
+    settingsRepository: SettingsRepository? = null,
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
     val cameras by cameraRepository.cameras.collectAsState()
+    val customFirebaseJson by (settingsRepository?.customFirebaseJson?.collectAsState(initial = null) 
+        ?: remember { mutableStateOf<String?>(null) })
 
     var showGenerateDialog by remember { mutableStateOf(false) }
     var showScanDialog by remember { mutableStateOf(false) }
@@ -119,7 +125,11 @@ fun ShareHubScreen(
                     durationHours = hours
                 )
                 activeTokens = listOf(tokenObj) + activeTokens
+                
+                // Encodes ShareToken + minified fbConfig (under 250 bytes)
                 val encrypted = generateShareQrUseCase.encodeToEncryptedPayload(tokenObj)
+                
+                // Renders high-contrast QR at ErrorCorrectionLevel.M
                 generateShareQrUseCase.renderQrBitmap(encrypted)
             }
         )
