@@ -1,6 +1,10 @@
 package com.vineyard.omnicam.app.ui.share
 
+import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
+import android.provider.MediaStore
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -12,9 +16,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -22,6 +29,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -37,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.vineyard.omnicam.app.core.theme.CyanAccent
@@ -48,6 +57,7 @@ fun GenerateQrDialog(
     onDismiss: () -> Unit,
     onGenerate: (selectedCameraIds: List<String>, permission: String, durationHours: Int) -> Bitmap
 ) {
+    val context = LocalContext.current
     val selectedIds = remember { mutableStateListOf<String>().apply { addAll(cameras.map { it.id }) } }
     var selectedPermission by remember { mutableStateOf("VIEW_ONLY") } // "VIEW_ONLY", "FULL_CONTROL_PTZ"
     var durationHours by remember { mutableIntStateOf(24) } // 1, 8, 24, 0
@@ -185,7 +195,7 @@ fun GenerateQrDialog(
                         }
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = "Have the guest scan this QR from their OmniCam Vision app to receive instant P2P stream access.",
+                            text = "Have the guest scan this QR from their OmniCam Vision app, or tap 'Share Image' to send via WhatsApp, Telegram, or Email.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -205,12 +215,34 @@ fun GenerateQrDialog(
                     Text("Generate Encrypted QR", color = Color.Black)
                 }
             } else {
-                Button(
-                    onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
-                    modifier = Modifier.testTag("btn_done_qr")
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Done", color = Color.Black)
+                    // Share Image Button (Launches Android Share Sheet)
+                    OutlinedButton(
+                        onClick = {
+                            shareQrBitmapToApps(context, generatedBitmap!!)
+                        },
+                        modifier = Modifier.testTag("btn_share_qr_image")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = null,
+                            tint = CyanAccent,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Share Image", color = CyanAccent)
+                    }
+
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
+                        modifier = Modifier.testTag("btn_done_qr")
+                    ) {
+                        Text("Done", color = Color.Black)
+                    }
                 }
             }
         },
@@ -223,4 +255,42 @@ fun GenerateQrDialog(
             }
         }
     )
+}
+
+/**
+ * Saves the QR bitmap into MediaStore and triggers Android's native Intent.ACTION_SEND
+ * allowing the Admin to share the QR image directly to WhatsApp, Telegram, Email, etc.
+ */
+private fun shareQrBitmapToApps(context: Context, bitmap: Bitmap) {
+    try {
+        val uriString = MediaStore.Images.Media.insertImage(
+            context.contentResolver,
+            bitmap,
+            "OmniCam_Access_QR_${System.currentTimeMillis()}",
+            "Scan this QR code in OmniCam Vision to connect to shared cameras."
+        )
+        if (!uriString.isNullOrBlank()) {
+            val imageUri = Uri.parse(uriString)
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "image/png"
+                putExtra(Intent.EXTRA_STREAM, imageUri)
+                putExtra(
+                    Intent.EXTRA_TEXT,
+                    "Here is your secure camera access QR code for OmniCam Vision. Scan this QR in the app to connect."
+                )
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(shareIntent, "Share Access QR via"))
+        }
+    } catch (_: Exception) {
+        // Fallback: Share invitation text if image insert fails
+        val textIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(
+                Intent.EXTRA_TEXT,
+                "Scan your camera access QR code in OmniCam Vision to view the shared home feeds."
+            )
+        }
+        context.startActivity(Intent.createChooser(textIntent, "Share Invitation"))
+    }
 }
