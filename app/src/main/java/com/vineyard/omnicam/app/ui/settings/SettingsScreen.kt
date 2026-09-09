@@ -22,12 +22,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -62,13 +67,18 @@ import com.vineyard.omnicam.app.core.theme.CyanAccent
 import com.vineyard.omnicam.app.core.theme.EmeraldLive
 import com.vineyard.omnicam.app.core.theme.RoseAlert
 import com.vineyard.omnicam.app.core.theme.ThemeMode
+import com.vineyard.omnicam.app.data.repository.AuthRepository
 import com.vineyard.omnicam.app.data.repository.SettingsRepository
+import com.vineyard.omnicam.app.ui.landing.ByoFirebaseDialog
 import java.io.File
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 @Composable
 fun SettingsScreen(
     settingsRepository: SettingsRepository,
+    authRepository: AuthRepository? = null,
+    onNavigateToLanding: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -76,15 +86,84 @@ fun SettingsScreen(
     val isBiometric by settingsRepository.isBiometricEnabled.collectAsState(initial = false)
     val isAutoCleanup by settingsRepository.isAutoCleanupEnabled.collectAsState(initial = true)
     val maxClipSec by settingsRepository.maxClipDuration.collectAsState(initial = 20)
+    val customFirebaseJson by settingsRepository.customFirebaseJson.collectAsState(initial = null)
     val coroutineScope = rememberCoroutineScope()
 
     var crashReports by remember { mutableStateOf(OmniCrashHandler.getCrashReports()) }
     var selectedReportContent by remember { mutableStateOf<Pair<String, String>?>(null) }
     var actionStatusMessage by remember { mutableStateOf<String?>(null) }
     var showCrashConfirmDialog by remember { mutableStateOf(false) }
+    var showByoDialog by remember { mutableStateOf(false) }
+    var showSignOutConfirm by remember { mutableStateOf(false) }
 
     val omniLogDir = remember {
         OmniCrashHandler.getOmniLogDirectory() ?: File(Environment.getExternalStorageDirectory(), "omni log")
+    }
+
+    // Parse configured project ID from custom Firebase JSON
+    val configuredProjectId = remember(customFirebaseJson) {
+        if (!customFirebaseJson.isNullOrBlank()) {
+            try {
+                val root = JSONObject(customFirebaseJson!!)
+                if (root.has("project_info")) {
+                    root.getJSONObject("project_info").optString("project_id", "Configured")
+                } else if (root.has("p")) {
+                    root.optString("p", "Configured")
+                } else {
+                    "Custom Project Active"
+                }
+            } catch (_: Exception) {
+                "Custom Project Active"
+            }
+        } else {
+            null
+        }
+    }
+
+    // BYO Firebase Dialog
+    if (showByoDialog) {
+        ByoFirebaseDialog(
+            onDismiss = { showByoDialog = false },
+            onSaveJson = { json ->
+                coroutineScope.launch {
+                    settingsRepository.saveCustomFirebaseJson(json)
+                    actionStatusMessage = "Firebase credentials updated successfully."
+                }
+            }
+        )
+    }
+
+    // Sign Out Confirmation Dialog
+    if (showSignOutConfirm) {
+        AlertDialog(
+            onDismissRequest = { showSignOutConfirm = false },
+            title = { Text("Sign Out & Switch Home?", color = MaterialTheme.colorScheme.onSurface) },
+            text = {
+                Text(
+                    text = "This will sign you out of your current session, clear temporary access tokens, and return you to the onboarding landing page.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showSignOutConfirm = false
+                        authRepository?.signOut()
+                        settingsRepository.saveActiveGuestShareToken("")
+                        onNavigateToLanding?.invoke()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseAlert),
+                    modifier = Modifier.testTag("btn_confirm_sign_out")
+                ) {
+                    Text("Sign Out Now", color = Color.White)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showSignOutConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showCrashConfirmDialog) {
@@ -101,7 +180,6 @@ fun SettingsScreen(
                 Button(
                     onClick = {
                         showCrashConfirmDialog = false
-                        // Deliberate test crash to demonstrate uncaught exception handler
                         throw RuntimeException("OmniCam Vision deliberate test crash: Testing crash logging to /sdcard/omni log/")
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = RoseAlert),
@@ -167,7 +245,109 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // SECTION: CRASH REPORTS & LOGGING (Prominently featured per user prompt)
+        // SECTION: HOUSE ADMIN FIREBASE SETUP
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(18.dp))
+                .testTag("card_admin_firebase_setup"),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(if (configuredProjectId != null) EmeraldLive.copy(alpha = 0.15f) else AmberWarning.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (configuredProjectId != null) Icons.Default.CloudDone else Icons.Default.Cloud,
+                                contentDescription = null,
+                                tint = if (configuredProjectId != null) EmeraldLive else AmberWarning,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "House Admin Firebase",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (configuredProjectId != null) "Project: $configuredProjectId" else "Not Configured (Default)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (configuredProjectId != null) EmeraldLive else AmberWarning
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = if (configuredProjectId != null) {
+                        "Your custom google-services.json is active. Generated member QR codes will automatically bundle these credentials."
+                    } else {
+                        "Upload your private google-services.json so generated QR codes can link family members to your database."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { showByoDialog = true },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("btn_manage_byo_firebase"),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent)
+                    ) {
+                        Icon(Icons.Default.UploadFile, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (configuredProjectId != null) "Update JSON" else "Upload JSON",
+                            color = Color.Black,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+
+                    if (configuredProjectId != null) {
+                        OutlinedButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    settingsRepository.clearCustomFirebaseJson()
+                                    actionStatusMessage = "Custom Firebase configuration cleared."
+                                }
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = RoseAlert),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, RoseAlert)
+                        ) {
+                            Icon(Icons.Default.DeleteForever, contentDescription = null, tint = RoseAlert, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Reset", color = RoseAlert, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // SECTION: CRASH REPORTS & LOGGING
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -227,7 +407,6 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Storage location callout
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -261,7 +440,6 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Diagnostic Test Buttons
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -494,6 +672,23 @@ fun SettingsScreen(
                 Text("Cloud Storage: Google Drive 15GB Zero-Cost Tier", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("Crash Handler: OmniCrashHandler active (/sdcard/omni log)", style = MaterialTheme.typography.bodySmall, color = CyanAccent)
             }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // SECTION: ACCOUNT & SESSION MANAGEMENT (Sign Out / Switch Home)
+        Button(
+            onClick = { showSignOutConfirm = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .testTag("btn_sign_out_home"),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = RoseAlert)
+        ) {
+            Icon(Icons.Default.Logout, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Sign Out & Switch Home", color = Color.White, style = MaterialTheme.typography.labelLarge)
         }
 
         Spacer(modifier = Modifier.height(48.dp))
