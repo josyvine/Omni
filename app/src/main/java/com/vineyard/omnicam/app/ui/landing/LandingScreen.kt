@@ -172,13 +172,14 @@ fun LandingScreen(
         // Action Card 2: Sign In with Google (Drive 15GB Cloud)
         ActionCard(
             title = "Connect Google Account",
-            subtitle = "Enables free 15 GB Google Drive anti-theft cloud clip uploads via OAuth 2.0 PKCE.",
+            subtitle = "Enables free 15 GB Google Drive anti-theft cloud clip uploads via OAuth 2.0 PKCE. Opens secure browser and returns here.",
             icon = Icons.Default.CloudQueue,
             accentColor = EmeraldLive,
             testTag = "action_google_signin",
             onClick = {
                 viewModel.connectGoogleDrive()
-                onNavigateToDashboard()
+                // Does NOT navigate to dashboard prematurely.
+                // The browser Custom Tab handles authentication and deep-link returns back here.
             }
         )
 
@@ -208,6 +209,7 @@ fun LandingScreen(
 
         Spacer(modifier = Modifier.height(28.dp))
 
+        // Deliberate Gate to Enter Dashboard
         Button(
             onClick = onNavigateToDashboard,
             modifier = Modifier
