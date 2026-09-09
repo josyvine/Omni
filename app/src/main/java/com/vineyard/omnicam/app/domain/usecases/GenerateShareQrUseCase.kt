@@ -22,7 +22,7 @@ import javax.inject.Inject
  * 3. Permitted camera IDs list.
  * 4. Permission level ("VIEW_ONLY" or "FULL_CONTROL_PTZ").
  * 5. Expiration timestamp.
- * 6. Admin's Firebase JSON configuration (allowing guests to connect to Admin's private DB).
+ * 6. Minified Admin Firebase credentials (projectId, apiKey, appId, storageBucket).
  */
 class GenerateShareQrUseCase @Inject constructor(
     private val cryptoManager: CryptoManager,
@@ -55,15 +55,17 @@ class GenerateShareQrUseCase @Inject constructor(
     }
 
     /**
-     * Serializes and encrypts the ShareToken along with the Admin's Firebase configuration into an AES-256 string.
+     * Serializes and encrypts the ShareToken along with minified Firebase credentials into an AES-256 string.
      */
     fun encodeToEncryptedPayload(
         token: ShareToken,
         customFirebaseJson: String? = null
     ): String {
-        val configToPack = customFirebaseJson 
+        val rawConfig = customFirebaseJson 
             ?: settingsRepository?.getCustomFirebaseJson() 
             ?: ""
+
+        val essentialConfig = extractEssentialFirebaseConfig(rawConfig)
 
         val json = JSONObject().apply {
             put("token", token.token)
@@ -71,14 +73,52 @@ class GenerateShareQrUseCase @Inject constructor(
             put("cameras", JSONArray(token.cameraIds))
             put("perm", token.permission)
             put("exp", token.expiresAt)
-            if (configToPack.isNotBlank()) {
-                put("firebaseConfig", configToPack)
+            if (essentialConfig != null) {
+                put("fbConfig", essentialConfig)
             }
             put("createdAt", token.createdAt)
-            put("v", 1)
+            put("v", 2)
         }.toString()
 
         return cryptoManager.encrypt(json)
+    }
+
+    /**
+     * Extracts only the 4 essential Firebase parameters to prevent QR buffer overflows:
+     * - p: projectId
+     * - k: apiKey
+     * - a: applicationId
+     * - b: storageBucket
+     */
+    private fun extractEssentialFirebaseConfig(rawJson: String): JSONObject? {
+        if (rawJson.isBlank()) return null
+        return try {
+            val root = JSONObject(rawJson)
+            if (root.has("project_info") && root.has("client")) {
+                val projectInfo = root.getJSONObject("project_info")
+                val projectId = projectInfo.getString("project_id")
+                val storageBucket = projectInfo.optString("storage_bucket", "")
+                val clientArray = root.getJSONArray("client")
+                val firstClient = clientArray.getJSONObject(0)
+                val apiKey = firstClient.getJSONArray("api_key").getJSONObject(0).getString("current_key")
+                val appId = firstClient.getJSONObject("client_info").getString("mobilesdk_app_id")
+
+                JSONObject().apply {
+                    put("p", projectId)
+                    put("k", apiKey)
+                    put("a", appId)
+                    if (storageBucket.isNotBlank()) {
+                        put("b", storageBucket)
+                    }
+                }
+            } else if (root.has("p") && root.has("k") && root.has("a")) {
+                root
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /**
@@ -112,10 +152,12 @@ class GenerateShareQrUseCase @Inject constructor(
 
     /**
      * Renders an encrypted string into a high-contrast QR Code Bitmap.
+     * Uses ErrorCorrectionLevel.M to guarantee compact byte density and fast scanning.
      */
     fun renderQrBitmap(content: String, size: Int = 512): Bitmap {
         val hints = mapOf(
-            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.H,
+            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+            EncodeHintType.CHARACTER_SET to "UTF-8",
             EncodeHintType.MARGIN to 1
         )
         val bitMatrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, size, size, hints)
