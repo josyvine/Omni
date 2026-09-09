@@ -1,5 +1,8 @@
 package com.vineyard.omnicam.app.ui.landing
 
+import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,9 +52,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
+import com.vineyard.omnicam.app.core.constants.CentralConfig
 import com.vineyard.omnicam.app.core.theme.CyanAccent
 import com.vineyard.omnicam.app.core.theme.ElectricBlue
 import com.vineyard.omnicam.app.core.theme.EmeraldLive
@@ -64,6 +72,7 @@ fun LandingScreen(
     onNavigateToDashboard: () -> Unit,
     onGuestQrScanned: ((String) -> Unit)? = null
 ) {
+    val context = LocalContext.current
     val showByoDialog by viewModel.showByoDialog.collectAsState()
     val configuredProjectId by viewModel.configuredProjectId.collectAsState()
     val isDriveConnected by viewModel.isDriveConnected.collectAsState()
@@ -72,11 +81,44 @@ fun LandingScreen(
 
     var showScanQrDialog by remember { mutableStateOf(false) }
 
+    // Google Sign-In Options configured with Central Web Client ID
+    val gso = remember {
+        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(CentralConfig.WEB_CLIENT_ID)
+            .requestEmail()
+            .build()
+    }
+    val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
+
+    // Native Google Account Picker Launcher
+    val googleSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+            try {
+                val account = task.getResult(ApiException::class.java)
+                val idToken = account?.idToken
+                if (!idToken.isNullOrBlank()) {
+                    viewModel.signInWithGoogle(idToken) { success ->
+                        if (success) {
+                            onNavigateToDashboard()
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
     // BYO-Firebase Configuration Dialog
     if (showByoDialog) {
         ByoFirebaseDialog(
             onDismiss = { viewModel.dismissByoDialog() },
-            onSaveJson = { json -> viewModel.saveByoFirebase(json) }
+            onSaveJson = { json ->
+                viewModel.saveByoFirebase(json)
+                // Trigger Google Sign-In for Admin
+                googleSignInLauncher.launch(googleSignInClient.signInIntent)
+            }
         )
     }
 
@@ -89,7 +131,8 @@ fun LandingScreen(
                 if (onGuestQrScanned != null) {
                     onGuestQrScanned(rawPayload)
                 }
-                onNavigateToDashboard()
+                // Trigger Google Sign-In for Member
+                googleSignInLauncher.launch(googleSignInClient.signInIntent)
             }
         )
     }
@@ -100,15 +143,15 @@ fun LandingScreen(
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(24.dp),
+            .padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Hero Icon with Cyan Halo
         Box(
             modifier = Modifier
-                .size(88.dp)
+                .size(80.dp)
                 .clip(CircleShape)
                 .background(
                     Brush.radialGradient(
@@ -122,20 +165,20 @@ fun LandingScreen(
                 imageVector = Icons.Default.Videocam,
                 contentDescription = "OmniCam Vision Logo",
                 tint = CyanAccent,
-                modifier = Modifier.size(44.dp)
+                modifier = Modifier.size(40.dp)
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         Text(
             text = "OmniCam Vision",
-            style = MaterialTheme.typography.headlineLarge,
+            style = MaterialTheme.typography.headlineMedium,
             color = MaterialTheme.colorScheme.onBackground,
             fontWeight = FontWeight.Bold
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
         Text(
             text = "Universal Multi-Brand Security Dashboard",
@@ -143,7 +186,7 @@ fun LandingScreen(
             color = CyanAccent
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         Text(
             text = "Zero-Cost Serverless Architecture. Unify TP-Link Tapo, Reolink, Dahua, Hikvision & Tuya Smart Bulbs without monthly cloud subscriptions.",
@@ -152,7 +195,7 @@ fun LandingScreen(
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
         // Architecture Highlights Pills
         Row(
@@ -164,9 +207,9 @@ fun LandingScreen(
             PillarBadge(icon = Icons.Default.Security, label = "Serverless", color = IndigoAccent)
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        // Real-Time Feedback Banner (Displays connection status or alerts)
+        // Real-Time Feedback Banner
         if (statusMessage != null) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -188,7 +231,7 @@ fun LandingScreen(
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
         }
 
         // Action Card 1: Quick Start (Local & Direct)
@@ -201,77 +244,84 @@ fun LandingScreen(
             onClick = onNavigateToDashboard
         )
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Action Card 2: Connect Google Account (Drive Cloud)
-        val driveSubtitle = if (isDriveConnected) {
-            "Connected: ${currentUser?.email ?: "Google Account Active"}. Free 15 GB Drive cloud backup ready."
+        // Action Card 2: Sign In with Google
+        val isUserLoggedIn = currentUser != null
+        val googleSubtitle = if (isUserLoggedIn) {
+            "Signed in as: ${currentUser?.email}. Central identity verified."
         } else {
-            "Enables free 15 GB Google Drive anti-theft cloud clip uploads via OAuth 2.0 PKCE. Opens secure browser and returns here."
+            "Sign in with Google account to verify identity on Central Developer Firebase."
         }
         ActionCard(
-            title = if (isDriveConnected) "Google Drive Connected" else "Connect Google Account",
-            subtitle = driveSubtitle,
-            icon = if (isDriveConnected) Icons.Default.CloudDone else Icons.Default.CloudQueue,
+            title = if (isUserLoggedIn) "Google Account Connected" else "Sign in with Google",
+            subtitle = googleSubtitle,
+            icon = if (isUserLoggedIn) Icons.Default.CloudDone else Icons.Default.CloudQueue,
             accentColor = EmeraldLive,
-            statusBadge = if (isDriveConnected) "Connected" else null,
+            statusBadge = if (isUserLoggedIn) "Signed In" else null,
             testTag = "action_google_signin",
             onClick = {
-                viewModel.connectGoogleDrive()
+                googleSignInLauncher.launch(googleSignInClient.signInIntent)
             }
         )
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Action Card 3: Join as Guest (Scan QR Code)
         ActionCard(
             title = "Join as Guest (Scan QR Code)",
-            subtitle = "Scan an Admin's encrypted QR code to instantly connect to shared home cameras with zero password entry.",
+            subtitle = "Scan an Admin's encrypted QR code to import configuration, then verify with Google.",
             icon = Icons.Default.QrCodeScanner,
             accentColor = IndigoAccent,
             testTag = "action_scan_guest_qr",
             onClick = { showScanQrDialog = true }
         )
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Action Card 4: Bring-Your-Own Firebase
+        // Action Card 4: Bring-Your-Own Firebase (Compact Card Design)
         val byoSubtitle = if (configuredProjectId != null) {
-            "Project: $configuredProjectId is active. Generated member QR codes will automatically bundle these credentials."
+            "Project: $configuredProjectId active. Bundled in member QR codes."
         } else {
-            "Privacy-first architecture. Supply your own google-services.json for dedicated private cloud storage."
+            "Supply your own google-services.json for dedicated private cloud storage."
         }
         ActionCard(
             title = if (configuredProjectId != null) "House Admin Firebase Configured" else "Bring-Your-Own Firebase",
             subtitle = byoSubtitle,
             icon = if (configuredProjectId != null) Icons.Default.CheckCircle else Icons.Default.Storage,
             accentColor = if (configuredProjectId != null) EmeraldLive else ElectricBlue,
-            statusBadge = if (configuredProjectId != null) "Active: $configuredProjectId" else null,
+            statusBadge = if (configuredProjectId != null) "Active" else null,
             testTag = "action_byo_firebase",
             onClick = { viewModel.openByoDialog() }
         )
 
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        // Deliberate Gate to Enter Dashboard
+        // Gate to Enter Dashboard
         Button(
-            onClick = onNavigateToDashboard,
+            onClick = {
+                if (isUserLoggedIn) {
+                    onNavigateToDashboard()
+                } else {
+                    googleSignInLauncher.launch(googleSignInClient.signInIntent)
+                }
+            },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(54.dp)
+                .height(52.dp)
                 .testTag("launch_dashboard_button"),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(containerColor = CyanAccent)
         ) {
             Text(
-                text = "Enter Security Dashboard",
+                text = if (isUserLoggedIn) "Enter Security Dashboard" else "Sign In & Enter Dashboard",
                 style = MaterialTheme.typography.titleMedium,
                 color = Color.Black,
                 fontWeight = FontWeight.Bold
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
@@ -282,11 +332,11 @@ private fun PillarBadge(icon: ImageVector, label: String, color: Color) {
             .clip(RoundedCornerShape(20.dp))
             .background(color.copy(alpha = 0.12f))
             .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(imageVector = icon, contentDescription = label, tint = color, modifier = Modifier.size(16.dp))
-        Spacer(modifier = Modifier.width(6.dp))
+        Icon(imageVector = icon, contentDescription = label, tint = color, modifier = Modifier.size(15.dp))
+        Spacer(modifier = Modifier.width(5.dp))
         Text(text = label, style = MaterialTheme.typography.labelSmall, color = color)
     }
 }
@@ -304,22 +354,22 @@ private fun ActionCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
             .clickable { onClick() }
             .testTag(testTag),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
         ),
-        shape = RoundedCornerShape(18.dp)
+        shape = RoundedCornerShape(16.dp)
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(46.dp)
+                    .size(42.dp)
                     .clip(CircleShape)
                     .background(accentColor.copy(alpha = 0.15f))
                     .border(1.dp, accentColor.copy(alpha = 0.4f), CircleShape),
@@ -329,11 +379,11 @@ private fun ActionCard(
                     imageVector = icon,
                     contentDescription = title,
                     tint = accentColor,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.width(14.dp))
+            Spacer(modifier = Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Row(
@@ -362,7 +412,7 @@ private fun ActionCard(
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
