@@ -16,10 +16,10 @@ import javax.inject.Inject
  * Flow:
  * 1. Takes the raw encrypted AES-256 string from CameraX / ML Kit.
  * 2. Decrypts it using [CryptoManager].
- * 3. Parses the decrypted JSON to extract the Admin's Firebase configuration JSON,
+ * 3. Parses the decrypted JSON to extract the Admin's minified Firebase configuration (`fbConfig`),
  *    permitted camera IDs, permission level, and expiration timestamp.
  * 4. Checks if the token has expired.
- * 5. Persists the Admin's Firebase JSON in [SettingsRepository].
+ * 5. Reconstructs and persists the Admin's Firebase JSON in [SettingsRepository].
  * 6. Mounts the Admin's secondary FirebaseApp instance ("admin_cam_app") dynamically
  *    so the guest can query the Admin's Firestore database without needing Keystore SHA-1.
  */
@@ -45,7 +45,6 @@ class ProcessScannedQrUseCase @Inject constructor(
             val adminUserId = rootJson.optString("adminUserId", "admin_master")
             val permission = rootJson.optString("perm", "VIEW_ONLY")
             val expiresAt = rootJson.optLong("exp", 0L)
-            val firebaseConfigJson = rootJson.optString("firebaseConfig", "")
 
             if (token.isEmpty() || adminEmail.isEmpty()) {
                 return@withContext Result.failure(IllegalArgumentException("Malformed QR Code: Missing required authentication tokens."))
@@ -66,16 +65,58 @@ class ProcessScannedQrUseCase @Inject constructor(
                 }
             }
 
-            // 5. Mount the Admin's Firebase configuration if provided in the QR code
-            if (firebaseConfigJson.isNotBlank()) {
-                // Save config to encrypted persistent storage
-                settingsRepository.saveCustomFirebaseJson(firebaseConfigJson)
+            // 5. Extract and mount the Admin's Firebase configuration
+            val finalFirebaseJson: String? = when {
+                // Version 2: Minified 4-key config object
+                rootJson.has("fbConfig") -> {
+                    val fbObj = rootJson.getJSONObject("fbConfig")
+                    val projectId = fbObj.optString("p", "")
+                    val apiKey = fbObj.optString("k", "")
+                    val appId = fbObj.optString("a", "")
+                    val storageBucket = fbObj.optString("b", "")
 
-                // Dynamically initialize the Admin's named secondary FirebaseApp instance
-                firebaseModule.initializeCustomFirebase(firebaseConfigJson)
+                    if (projectId.isNotBlank() && apiKey.isNotBlank() && appId.isNotBlank()) {
+                        // Reconstruct standard schema expected by FirebaseModule
+                        JSONObject().apply {
+                            put("project_info", JSONObject().apply {
+                                put("project_id", projectId)
+                                if (storageBucket.isNotBlank()) {
+                                    put("storage_bucket", storageBucket)
+                                }
+                            })
+                            put("client", JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("client_info", JSONObject().apply {
+                                        put("mobilesdk_app_id", appId)
+                                    })
+                                    put("api_key", JSONArray().apply {
+                                        put(JSONObject().apply {
+                                            put("current_key", apiKey)
+                                        })
+                                    })
+                                })
+                            })
+                        }.toString()
+                    } else {
+                        null
+                    }
+                }
+                // Version 1 fallback: Raw JSON string
+                rootJson.has("firebaseConfig") -> {
+                    rootJson.optString("firebaseConfig", "")
+                }
+                else -> null
             }
 
-            // 6. Construct the validated ShareToken model with cameraIds matching the schema
+            if (!finalFirebaseJson.isNull prematureBlank()) {
+                // Save config to encrypted persistent storage
+                settingsRepository.saveCustomFirebaseJson(finalFirebaseJson)
+
+                // Dynamically initialize the Admin's named secondary FirebaseApp instance
+                firebaseModule.initializeCustomFirebase(finalFirebaseJson)
+            }
+
+            // 6. Construct the validated ShareToken model
             val shareToken = ShareToken(
                 token = token,
                 adminUserId = adminUserId,
@@ -93,5 +134,9 @@ class ProcessScannedQrUseCase @Inject constructor(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private fun String?.isNullOrBlankCompat(): Boolean {
+        return this == null || this.trim().isEmpty()
     }
 }
