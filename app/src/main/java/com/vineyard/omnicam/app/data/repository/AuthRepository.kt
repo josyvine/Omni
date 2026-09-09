@@ -3,6 +3,7 @@ package com.vineyard.omnicam.app.data.repository
 import android.content.Context
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.SetOptions
 import com.vineyard.omnicam.app.core.constants.CentralConfig
 import com.vineyard.omnicam.app.core.utils.DeepLinkHandler
 import com.vineyard.omnicam.app.data.models.ShareToken
@@ -23,8 +24,9 @@ import java.security.MessageDigest
  * 1. Signs into Developer Central Firebase via Google Auth (using developer Keystore SHA-1).
  * 2. Bridges silently into the User Admin's private Firebase using deterministic Email/Password
  *    auth (requiring zero SHA-1 setup for the user).
- * 3. Handles Google Drive OAuth 2.0 PKCE token negotiation.
- * 4. Handles Guest sessions imported via encrypted QR codes.
+ * 3. Distinguishes roles ("admin" vs "guest") and syncs profile documents to Firestore.
+ * 4. Handles Google Drive OAuth 2.0 PKCE token negotiation.
+ * 5. Handles Guest sessions imported via encrypted QR codes.
  */
 class AuthRepository(
     private val context: Context,
@@ -49,6 +51,20 @@ class AuthRepository(
      * Restores an existing session on app launch.
      */
     private fun restoreSession() {
+        val guestToken = settingsRepository.getActiveGuestShareToken()
+        if (!guestToken.isNullOrBlank()) {
+            val tokenSnippet = if (guestToken.length >= 8) guestToken.substring(0, 8) else guestToken
+            _currentUser.value = UserProfile(
+                uid = "guest_$tokenSnippet",
+                email = "guest@shared.home",
+                displayName = "Guest Member",
+                photoUrl = null,
+                role = "guest",
+                driveConnected = false
+            )
+            return
+        }
+
         val centralUser = firebaseModule.centralAuth?.currentUser
         if (centralUser != null) {
             _currentUser.value = UserProfile(
@@ -59,26 +75,17 @@ class AuthRepository(
                 role = "admin",
                 driveConnected = _isDriveConnected.value
             )
-        } else {
-            val guestToken = settingsRepository.getActiveGuestShareToken()
-            if (!guestToken.isNullOrBlank()) {
-                val tokenSnippet = if (guestToken.length >= 8) guestToken.substring(0, 8) else guestToken
-                _currentUser.value = UserProfile(
-                    uid = "guest_$tokenSnippet",
-                    email = "guest@shared.home",
-                    displayName = "Guest Member",
-                    photoUrl = null,
-                    role = "guest",
-                    driveConnected = false
-                )
-            }
         }
     }
 
     /**
      * Step 1: Sign in with Google ID Token on the Central Developer Firebase instance.
+     * Accepts explicit role ("admin" for House Admin, "guest" for House Member).
      */
-    suspend fun signInWithGoogle(idToken: String): Result<UserProfile> = withContext(Dispatchers.IO) {
+    suspend fun signInWithGoogle(
+        idToken: String,
+        role: String = "admin"
+    ): Result<UserProfile> = withContext(Dispatchers.IO) {
         try {
             val centralAuth = firebaseModule.centralAuth
                 ?: return@withContext Result.failure(IllegalStateException("Central Firebase Auth is not initialized."))
@@ -93,15 +100,15 @@ class AuthRepository(
 
             // Step 2: Silently bridge into the secondary Admin Firebase if configured
             if (firebaseModule.isCustomConfigured() && email.isNotBlank()) {
-                bridgeToAdminFirebase(email, googleUid)
+                bridgeToAdminFirebase(email, googleUid, role, user.displayName)
             }
 
             val profile = UserProfile(
                 uid = googleUid,
                 email = email,
-                displayName = user.displayName ?: "Admin User",
+                displayName = user.displayName ?: if (role == "admin") "Admin User" else "Guest Member",
                 photoUrl = user.photoUrl?.toString(),
-                role = "admin",
+                role = role,
                 driveConnected = _isDriveConnected.value
             )
 
@@ -116,11 +123,16 @@ class AuthRepository(
 
     /**
      * Silent Identity Bridge:
-     * Generates a deterministic SHA-256 password from the user's email and Google UID.
-     * Signs in or creates the user in the User Admin's private Firebase using Email/Password.
-     * This requires ZERO SHA-1 configuration on the Admin's project.
+     * 1. Generates deterministic SHA-256 password.
+     * 2. Signs in or creates user in User Admin's private Firebase with Email/Password.
+     * 3. Syncs user role ("admin" or "guest") to the private Firestore "users" collection.
      */
-    private suspend fun bridgeToAdminFirebase(email: String, googleUid: String) {
+    private suspend fun bridgeToAdminFirebase(
+        email: String,
+        googleUid: String,
+        role: String,
+        displayName: String?
+    ) {
         val adminAuth = firebaseModule.adminAuth ?: return
         val securePassword = calculateSecurePassword(email, googleUid)
 
@@ -132,8 +144,27 @@ class AuthRepository(
             try {
                 adminAuth.createUserWithEmailAndPassword(email, securePassword).await()
             } catch (_: Exception) {
-                // Ignore if account collision or rules prevent creation
+                // Ignore if collision occurs
             }
+        }
+
+        // Sync User document to Admin's Firestore so rules like isAdmin() evaluate properly
+        try {
+            val adminFirestore = firebaseModule.adminFirestore
+            if (adminFirestore != null) {
+                val userMap = hashMapOf(
+                    "uid" to googleUid,
+                    "email" to email,
+                    "displayName" to (displayName ?: if (role == "admin") "House Admin" else "House Member"),
+                    "role" to role,
+                    "updatedAt" to System.currentTimeMillis()
+                )
+                adminFirestore.collection("users").document(googleUid)
+                    .set(userMap, SetOptions.merge())
+                    .await()
+            }
+        } catch (_: Exception) {
+            // Non-fatal if Firestore rules enforce write boundaries
         }
     }
 
@@ -203,6 +234,7 @@ class AuthRepository(
         try {
             firebaseModule.centralAuth?.signOut()
             firebaseModule.adminAuth?.signOut()
+            firebaseModule.clearCustomConfig()
         } catch (_: Exception) {}
 
         settingsRepository.saveActiveGuestShareToken("")
