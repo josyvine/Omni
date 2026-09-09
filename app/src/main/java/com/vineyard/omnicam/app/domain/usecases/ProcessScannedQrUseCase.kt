@@ -42,6 +42,7 @@ class ProcessScannedQrUseCase @Inject constructor(
 
             val token = rootJson.optString("token", "")
             val adminEmail = rootJson.optString("admin", "")
+            val adminUserId = rootJson.optString("adminUserId", "admin_master")
             val permission = rootJson.optString("perm", "VIEW_ONLY")
             val expiresAt = rootJson.optLong("exp", 0L)
             val firebaseConfigJson = rootJson.optString("firebaseConfig", "")
@@ -74,11 +75,12 @@ class ProcessScannedQrUseCase @Inject constructor(
                 firebaseModule.initializeCustomFirebase(firebaseConfigJson)
             }
 
-            // 6. Construct the validated ShareToken model
+            // 6. Construct the validated ShareToken model with cameraIds matching the schema
             val shareToken = ShareToken(
                 token = token,
+                adminUserId = adminUserId,
                 adminEmail = adminEmail,
-                permittedCameraIds = permittedCameraIds,
+                cameraIds = permittedCameraIds,
                 permission = permission,
                 expiresAt = expiresAt,
                 createdAt = rootJson.optLong("createdAt", currentTime)
