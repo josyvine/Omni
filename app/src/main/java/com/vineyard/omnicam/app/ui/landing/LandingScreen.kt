@@ -1,7 +1,9 @@
 package com.vineyard.omnicam.app.ui.landing
 
 import android.app.Activity
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -57,8 +59,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.tasks.Task
 import com.vineyard.omnicam.app.core.constants.CentralConfig
 import com.vineyard.omnicam.app.core.theme.CyanAccent
 import com.vineyard.omnicam.app.core.theme.ElectricBlue
@@ -82,31 +87,36 @@ fun LandingScreen(
     var showScanQrDialog by remember { mutableStateOf(false) }
 
     // Google Sign-In Options configured with Central Web Client ID
-    val gso = remember {
+    val gso: GoogleSignInOptions = remember {
         GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestIdToken(CentralConfig.WEB_CLIENT_ID)
             .requestEmail()
             .build()
     }
-    val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
+    val googleSignInClient: GoogleSignInClient = remember(context) { 
+        GoogleSignIn.getClient(context, gso) 
+    }
 
-    // Native Google Account Picker Launcher
+    // Native Google Account Picker Launcher with explicit type inference
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
+    ) { result: ActivityResult ->
         if (result.resultCode == Activity.RESULT_OK) {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            try {
-                val account = task.getResult(ApiException::class.java)
-                val idToken = account?.idToken
-                if (!idToken.isNullOrBlank()) {
-                    viewModel.signInWithGoogle(idToken) { success ->
-                        if (success) {
-                            onNavigateToDashboard()
+            val intentData: Intent? = result.data
+            if (intentData != null) {
+                val task: Task<GoogleSignInAccount> = GoogleSignIn.getSignedInAccountFromIntent(intentData)
+                try {
+                    val account: GoogleSignInAccount? = task.getResult(ApiException::class.java)
+                    val idToken: String? = account?.idToken
+                    if (!idToken.isNullOrBlank()) {
+                        viewModel.signInWithGoogle(idToken) { success: Boolean ->
+                            if (success) {
+                                onNavigateToDashboard()
+                            }
                         }
                     }
-                }
-            } catch (_: Exception) {}
+                } catch (_: Exception) {}
+            }
         }
     }
 
