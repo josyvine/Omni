@@ -102,6 +102,10 @@ dependencies {
   implementation(libs.firebase.ai)
   implementation(libs.firebase.firestore)
   implementation(libs.firebase.auth)
+
+  // Google Sign-In SDK (Resolves GoogleSignIn, GoogleSignInOptions, and GoogleSignInClient)
+  implementation("com.google.android.gms:play-services-auth:21.2.0")
+
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
   implementation(libs.googleid)
