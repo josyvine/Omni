@@ -62,8 +62,9 @@ class AuthRepository(
         } else {
             val guestToken = settingsRepository.getActiveGuestShareToken()
             if (!guestToken.isNullOrBlank()) {
+                val tokenSnippet = if (guestToken.length >= 8) guestToken.substring(0, 8) else guestToken
                 _currentUser.value = UserProfile(
-                    uid = "guest_${guestToken.take(8)}",
+                    uid = "guest_$tokenSnippet",
                     email = "guest@shared.home",
                     displayName = "Guest Member",
                     photoUrl = null,
@@ -149,8 +150,9 @@ class AuthRepository(
      * Authenticates the user into a Guest session after scanning a valid QR code.
      */
     fun authenticateAsGuest(token: ShareToken) {
+        val tokenSnippet = if (token.token.length >= 8) token.token.substring(0, 8) else token.token
         _currentUser.value = UserProfile(
-            uid = "guest_${token.token.take(8)}",
+            uid = "guest_$tokenSnippet",
             email = "guest@shared.home",
             displayName = "Guest Member",
             photoUrl = null,
