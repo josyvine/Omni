@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Videocam
@@ -35,6 +36,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,18 +52,36 @@ import com.vineyard.omnicam.app.core.theme.CyanAccent
 import com.vineyard.omnicam.app.core.theme.ElectricBlue
 import com.vineyard.omnicam.app.core.theme.EmeraldLive
 import com.vineyard.omnicam.app.core.theme.IndigoAccent
+import com.vineyard.omnicam.app.ui.share.ScanQrDialog
 
 @Composable
 fun LandingScreen(
     viewModel: LandingViewModel,
-    onNavigateToDashboard: () -> Unit
+    onNavigateToDashboard: () -> Unit,
+    onGuestQrScanned: ((String) -> Unit)? = null
 ) {
     val showByoDialog by viewModel.showByoDialog.collectAsState()
+    var showScanQrDialog by remember { mutableStateOf(false) }
 
+    // BYO-Firebase Configuration Dialog
     if (showByoDialog) {
         ByoFirebaseDialog(
             onDismiss = { viewModel.dismissByoDialog() },
             onSaveJson = { json -> viewModel.saveByoFirebase(json) }
+        )
+    }
+
+    // CameraX Guest QR Scanner Dialog
+    if (showScanQrDialog) {
+        ScanQrDialog(
+            onDismissRequest = { showScanQrDialog = false },
+            onQrCodeScanned = { rawPayload ->
+                showScanQrDialog = false
+                if (onGuestQrScanned != null) {
+                    onGuestQrScanned(rawPayload)
+                }
+                onNavigateToDashboard()
+            }
         )
     }
 
@@ -162,7 +184,19 @@ fun LandingScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Action Card 3: Advanced BYO-Firebase
+        // Action Card 3: Join as Guest (Scan QR Code)
+        ActionCard(
+            title = "Join as Guest (Scan QR Code)",
+            subtitle = "Scan an Admin's encrypted QR code to instantly connect to shared home cameras with zero password entry.",
+            icon = Icons.Default.QrCodeScanner,
+            accentColor = IndigoAccent,
+            testTag = "action_scan_guest_qr",
+            onClick = { showScanQrDialog = true }
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Action Card 4: Advanced BYO-Firebase
         ActionCard(
             title = "Bring-Your-Own Firebase",
             subtitle = "Privacy-first architecture. Supply your own google-services.json for dedicated private cloud storage.",
