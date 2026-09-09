@@ -190,9 +190,17 @@ fun MainAppNavigation(appModule: AppModule) {
                     )
                 }
 
-                // Settings & System Control Screen
+                // Settings & System Control Screen (Properly wired to AuthRepository and navigation)
                 composable(Screen.Settings.route) {
-                    SettingsScreen(settingsRepository = appModule.settingsRepository)
+                    SettingsScreen(
+                        settingsRepository = appModule.settingsRepository,
+                        authRepository = appModule.authRepository,
+                        onNavigateToLanding = {
+                            navController.navigate(Screen.Landing.route) {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        }
+                    )
                 }
             }
         }
