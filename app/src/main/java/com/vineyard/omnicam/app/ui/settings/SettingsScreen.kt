@@ -133,14 +133,14 @@ fun SettingsScreen(
         )
     }
 
-    // Sign Out Confirmation Dialog
+    // Sign Out Confirmation Dialog (Completely wipes session, tokens, and custom Firebase JSON)
     if (showSignOutConfirm) {
         AlertDialog(
             onDismissRequest = { showSignOutConfirm = false },
             title = { Text("Sign Out & Switch Home?", color = MaterialTheme.colorScheme.onSurface) },
             text = {
                 Text(
-                    text = "This will sign you out of your current session, clear temporary access tokens, and return you to the onboarding landing page.",
+                    text = "This will sign you out, erase the active custom Firebase JSON configuration, clear temporary access tokens, and reset the app to the onboarding landing page.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
@@ -148,9 +148,16 @@ fun SettingsScreen(
                 Button(
                     onClick = {
                         showSignOutConfirm = false
-                        authRepository?.signOut()
-                        settingsRepository.saveActiveGuestShareToken("")
-                        onNavigateToLanding?.invoke()
+                        coroutineScope.launch {
+                            // Completely erase the uploaded JSON configuration
+                            settingsRepository.clearCustomFirebaseJson()
+                            // Clear guest share tokens
+                            settingsRepository.saveActiveGuestShareToken("")
+                            // Sign out of Central and Admin Firebase instances
+                            authRepository?.signOut()
+                            // Navigate immediately to Landing screen
+                            onNavigateToLanding?.invoke()
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = RoseAlert),
                     modifier = Modifier.testTag("btn_confirm_sign_out")
