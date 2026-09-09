@@ -5,6 +5,7 @@ data class UserProfile(
     val email: String = "local.user@omnicam.vision",
     val displayName: String = "OmniCam Admin",
     val photoUrl: String? = null,
+    val role: String = "admin",
     val driveConnected: Boolean = true,
     val driveStorageUsedBytes: Long = 1_420_000_000L, // 1.4 GB
     val driveStorageTotalBytes: Long = 15L * 1024 * 1024 * 1024, // 15 GB
