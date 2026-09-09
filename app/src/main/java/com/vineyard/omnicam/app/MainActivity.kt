@@ -1,5 +1,7 @@
 package com.vineyard.omnicam.app
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -11,9 +13,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -22,6 +23,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.vineyard.omnicam.app.core.theme.OmniCamTheme
 import com.vineyard.omnicam.app.core.theme.ThemeMode
+import com.vineyard.omnicam.app.di.AppModule
+import com.vineyard.omnicam.app.domain.usecases.ProcessScannedQrUseCase
 import com.vineyard.omnicam.app.ui.components.BottomNavBar
 import com.vineyard.omnicam.app.ui.drive.DriveEventsScreen
 import com.vineyard.omnicam.app.ui.drive.DriveEventsViewModel
@@ -32,14 +35,18 @@ import com.vineyard.omnicam.app.ui.live.LiveDashboardViewModel
 import com.vineyard.omnicam.app.ui.navigation.Screen
 import com.vineyard.omnicam.app.ui.settings.SettingsScreen
 import com.vineyard.omnicam.app.ui.share.ShareHubScreen
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var appModule: AppModule
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val appModule = (application as OmniCamApplication).appModule
+        appModule = (application as OmniCamApplication).appModule
+        handleOAuthDeepLink(intent)
 
         setContent {
             val currentTheme by appModule.settingsRepository.themeMode.collectAsState(initial = ThemeMode.DARK)
@@ -49,15 +56,51 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleOAuthDeepLink(intent)
+    }
+
+    /**
+     * Intercepts Google OAuth 2.0 PKCE deep-link redirects:
+     * com.vineyard.omnicam.app://oauth2redirect?code=AUTHORIZATION_CODE
+     */
+    private fun handleOAuthDeepLink(intent: Intent?) {
+        val data: Uri? = intent?.data
+        if (data != null && data.scheme == "com.vineyard.omnicam.app" && data.host == "oauth2redirect") {
+            val authCode = data.getQueryParameter("code")
+            if (!authCode.isNullOrBlank()) {
+                appModule.authRepository.handleOAuthCode(authCode)
+            }
+        }
+    }
 }
 
 @Composable
-fun MainAppNavigation(appModule: com.vineyard.omnicam.app.di.AppModule) {
+fun MainAppNavigation(appModule: AppModule) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val coroutineScope = rememberCoroutineScope()
 
+    // Determine initial destination: Launch directly into LiveDashboard if user has an active session
+    val currentUser by appModule.authRepository.currentUser.collectAsState()
+    val activeGuestToken = appModule.settingsRepository.getActiveGuestShareToken()
+    val hasActiveSession = currentUser != null || !activeGuestToken.isNullOrBlank()
+
+    val initialRoute = if (hasActiveSession) Screen.LiveDashboard.route else Screen.Landing.route
     val showBottomBar = currentRoute != null && currentRoute != Screen.Landing.route
+
+    // Instantiate ProcessScannedQrUseCase for guest scanning
+    val processScannedQrUseCase = remember {
+        ProcessScannedQrUseCase(
+            cryptoManager = appModule.cryptoManager,
+            settingsRepository = appModule.settingsRepository,
+            firebaseModule = appModule.firebaseModule
+        )
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -87,8 +130,9 @@ fun MainAppNavigation(appModule: com.vineyard.omnicam.app.di.AppModule) {
         ) {
             NavHost(
                 navController = navController,
-                startDestination = Screen.LiveDashboard.route
+                startDestination = initialRoute
             ) {
+                // Landing / Onboarding Screen
                 composable(Screen.Landing.route) {
                     val landingVm: LandingViewModel = viewModel {
                         LandingViewModel(
@@ -103,10 +147,16 @@ fun MainAppNavigation(appModule: com.vineyard.omnicam.app.di.AppModule) {
                             navController.navigate(Screen.LiveDashboard.route) {
                                 popUpTo(Screen.Landing.route) { inclusive = true }
                             }
+                        },
+                        onGuestQrScanned = { rawPayload ->
+                            coroutineScope.launch {
+                                processScannedQrUseCase(rawPayload)
+                            }
                         }
                     )
                 }
 
+                // Live Camera Dashboard Screen (Home)
                 composable(Screen.LiveDashboard.route) {
                     val liveVm: LiveDashboardViewModel = viewModel {
                         LiveDashboardViewModel(
@@ -120,6 +170,7 @@ fun MainAppNavigation(appModule: com.vineyard.omnicam.app.di.AppModule) {
                     LiveDashboardScreen(viewModel = liveVm)
                 }
 
+                // Google Drive Events & Cloud History Screen
                 composable(Screen.DriveEvents.route) {
                     val driveVm: DriveEventsViewModel = viewModel {
                         DriveEventsViewModel(
@@ -130,13 +181,16 @@ fun MainAppNavigation(appModule: com.vineyard.omnicam.app.di.AppModule) {
                     DriveEventsScreen(viewModel = driveVm)
                 }
 
+                // Family & Guest Sharing Hub Screen
                 composable(Screen.ShareHub.route) {
                     ShareHubScreen(
                         cameraRepository = appModule.cameraRepository,
-                        generateShareQrUseCase = appModule.generateShareQrUseCase
+                        generateShareQrUseCase = appModule.generateShareQrUseCase,
+                        processScannedQrUseCase = processScannedQrUseCase
                     )
                 }
 
+                // Settings & System Control Screen
                 composable(Screen.Settings.route) {
                     SettingsScreen(settingsRepository = appModule.settingsRepository)
                 }
