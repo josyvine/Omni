@@ -125,7 +125,8 @@ class AuthRepository(
      * Silent Identity Bridge:
      * 1. Generates deterministic SHA-256 password.
      * 2. Signs in or creates user in User Admin's private Firebase with Email/Password.
-     * 3. Syncs user role ("admin" or "guest") to the private Firestore "users" collection.
+     * 3. Syncs user role ("admin" or "guest") to the private Firestore "users" collection
+     *    using the local adminAuth UID so request.auth.uid == uid in security rules.
      */
     private suspend fun bridgeToAdminFirebase(
         email: String,
@@ -148,18 +149,22 @@ class AuthRepository(
             }
         }
 
-        // Sync User document to Admin's Firestore so rules like isAdmin() evaluate properly
+        // Retrieve local Email/Password Auth UID
+        val localAdminUid = adminAuth.currentUser?.uid ?: return
+
+        // Sync User document to Admin's Firestore using localAdminUid
         try {
             val adminFirestore = firebaseModule.adminFirestore
             if (adminFirestore != null) {
                 val userMap = hashMapOf(
-                    "uid" to googleUid,
+                    "uid" to localAdminUid,
+                    "googleUid" to googleUid,
                     "email" to email,
                     "displayName" to (displayName ?: if (role == "admin") "House Admin" else "House Member"),
                     "role" to role,
                     "updatedAt" to System.currentTimeMillis()
                 )
-                adminFirestore.collection("users").document(googleUid)
+                adminFirestore.collection("users").document(localAdminUid)
                     .set(userMap, SetOptions.merge())
                     .await()
             }
